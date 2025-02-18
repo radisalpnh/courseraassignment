@@ -1,0 +1,77 @@
+---
+title: "Predicting Exercise Manner Using Machine Learning"
+author: "Radisa Alpinah Priyanti"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Introduction
+
+Quantifying the quality of an activity is as important as quantifying its quantity. In this project, we utilize accelerometer data from sensors placed on the belt, forearm, arm, and dumbbell of six participants to predict how well they performed specific weightlifting exercises. The classification is represented by the "classe" variable, which we aim to predict using machine learning techniques.
+
+## Data Preparation
+
+```{r setup, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(dplyr)
+
+# Load dataset
+train_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train_data <- read.csv(url(train_url), na.strings = c("", "NA"))
+test_data <- read.csv(url(test_url), na.strings = c("", "NA"))
+```
+
+### Data Cleaning
+
+```{r}
+# Remove columns with excessive missing values
+na_counts <- colSums(is.na(train_data))
+train_data <- train_data[, na_counts == 0]  # Retain only columns without missing values
+
+# Remove irrelevant columns (ID, timestamps, etc.)
+train_data <- train_data[, -c(1:7)]
+
+# Display structure of the cleaned dataset
+str(train_data)
+```
+
+## Splitting Data into Training and Validation Sets
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(train_data$classe, p = 0.7, list = FALSE)
+train_set <- train_data[trainIndex, ]
+valid_set <- train_data[-trainIndex, ]
+```
+
+## Model Development Using Random Forest
+
+```{r}
+model_rf <- randomForest(classe ~ ., data = train_set, ntree = 100)
+print(model_rf)
+```
+
+## Model Evaluation Using Cross-Validation
+
+```{r}
+predictions <- predict(model_rf, valid_set)
+conf_matrix <- confusionMatrix(predictions, valid_set$classe)
+print(conf_matrix)
+```
+
+### Expected Out-of-Sample Error
+The accuracy of our model on the validation set is a key indicator of its expected performance on unseen data. Given the high accuracy observed in the confusion matrix, the estimated out-of-sample error is low, indicating a robust model.
+
+## Predictions on Test Data
+
+```{r}
+test_predictions <- predict(model_rf, test_data)
+test_predictions
+```
+
+## Conclusion
+
+Using a Random Forest classifier, we successfully predicted the manner in which weightlifting exercises were performed based on accelerometer sensor data. The model exhibited high accuracy with a low out-of-sample error. Future improvements could involve tuning hyperparameters or testing additional machine learning algorithms to further refine predictions.
+
