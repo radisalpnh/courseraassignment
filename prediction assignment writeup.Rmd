@@ -1,0 +1,121 @@
+---
+title: "Predictive Model"
+author: "Radisa"
+date: "2/20/2025"
+output:
+  html_document: default
+  pdf_document: default
+---
+# Weight Lifting Exercises Dataset 
+
+```{r,message=FALSE, warning=FALSE}
+library(dplyr)
+library(caret)
+library(corrplot)
+library(xgboost)
+library(Matrix)
+library(e1071)
+library(kernlab)
+```
+
+# Data Preprocessing and Feature Selection
+
+```{r setup, message=FALSE, warning=FALSE}
+test <- read.csv("pml-testing.csv", na.strings = c("NA","",'#DIV/0!'))
+train <- read.csv("pml-training.csv", na.strings = c("NA","",'#DIV/0!'))
+test <- test[, colSums(is.na(test)) == 0]
+test <- na.omit(test)
+train <- train[, colSums(is.na(train)) == 0]
+train <- na.omit(train)
+test <- test[, !colnames(test) %in% c("X", "problem_id", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")]
+train <- train[, !colnames(train) %in% c("X", "problem_id", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")]
+train$classe <- factor(train$classe)
+
+cor_matrix <- cor(train[, sapply(train, is.numeric)])
+correlated_features <- findCorrelation(cor_matrix, cutoff = 0.8)
+train <- train[, -correlated_features]
+test <- test[, -correlated_features]
+
+preProc_tr <- preProcess(train[,-41], method = c("center", "scale"))
+train_scaled <- predict(preProc_tr, train[,-41])
+train_scaled$classe <- train$classe
+preProc_te <- preProcess(test, method = c("center", "scale"))
+test_scaled <- predict(preProc_te, test)
+```
+
+# Split Train Data
+
+```{r,message=FALSE, warning=FALSE}
+set.seed(123)
+trainIndex <- createDataPartition(train_scaled$classe, p = 0.7, list = FALSE)
+train_data <- train_scaled[trainIndex,]
+test_data <- train_scaled[-trainIndex,]
+```
+
+# Random Forest Model
+
+```{r,message=FALSE, warning=FALSE}
+tune_grid <- expand.grid(mtry = c(2, 5, 10, 15, 20))
+control <- trainControl(method = "cv", number = 5)
+model_rf <- train(classe ~ ., data = train_data, method = "rf", trControl = control, tuneGrid = tune_grid, ntree = 100)
+confusionMatrix(predict(model_rf, test_data), test_data$classe)
+predict(model_rf, test_scaled)
+```
+
+# XGBoost Model
+
+```{r,message=FALSE, warning=FALSE}
+train_data1 <- data.matrix(train_data[,-41])
+train_data1 <- Matrix(train_data1, sparse = TRUE)
+train_y <- as.numeric(train_data$classe) - 1
+traindata <- list(data = train_data1, label = train_y)
+dtrain <- xgb.DMatrix(data = traindata$data, label = traindata$label)
+
+test_data1 <- data.matrix(test_data[,-41])
+test_data1 <- Matrix(test_data1, sparse = TRUE)
+test_y <- as.numeric(test_data$classe) - 1
+testdata <- list(data = test_data1, label = test_y)
+dtest <- xgb.DMatrix(data = testdata$data, label = testdata$label)
+
+test_scaled1 <- data.matrix(test_scaled)
+test_scaled1 <- Matrix(test_scaled1, sparse = TRUE)
+dtest_scaled <- xgb.DMatrix(data = test_scaled1)
+
+param <- list(
+  objective = "multi:softmax",
+  booster = "gbtree",
+  max_depth = 10,
+  eta = 0.3,
+  num_class = 5,
+  early_stopping_rounds = 5,
+  eval_metric = "mlogloss"
+)
+
+cv_results <- xgb.cv(
+  params = param,
+  data = dtrain,
+  nfold = 5,
+  nrounds = 500,
+  early_stopping_rounds = 5
+)
+
+best_iter <- cv_results$best_iteration
+xgb_model <- xgb.train(params = param, data = dtrain, nrounds = best_iter)
+pred <- predict(xgb_model, dtest)
+confusionMatrix(as.factor(pred), as.factor(test_y))
+class_labels <- c("A", "B", "C", "D", "E")
+class_labels[pred + 1]
+```
+
+# SVM Model
+
+```{r,message=FALSE, warning=FALSE}
+cv_control <- trainControl(method = "cv", number = 5)
+svm_cv_model <- train(
+  classe ~ ., 
+  data = train_data, 
+  method = "svmRadial", 
+  trControl = cv_control,
+  tuneGrid = expand.grid(sigma = 0.1, C = 0.5)
+)
+predict(svm_cv_model, test_scaled)
